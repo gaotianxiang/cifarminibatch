@@ -2,13 +2,14 @@ import numpy as np
 import pickle
 import os
 from sklearn.neighbors import NearestNeighbors
+from sklearn.decomposition import PCA
 from keras.utils import to_categorical as onehot
 from tqdm import tqdm
 
 
 class DataLoader:
     def __init__(self, dataset_name, dataset_path, batch_size, image_mode=True, standardization=False, use_knn=False,
-                 knn=8, use_pca=False):
+                 knn=8, use_pca=False, perc_var=0.99):
         self.dataset_name = dataset_name
         self.dataset_path = dataset_path
         self.train_x = []
@@ -19,6 +20,8 @@ class DataLoader:
         self.image_mode = image_mode
         self.standardization = standardization
         self.use_knn = use_knn
+        self.use_pca = use_pca
+        self.perc_var = perc_var
         self.k = knn
 
         self.batch_size = batch_size
@@ -65,30 +68,61 @@ class DataLoader:
         print('data loaded...')
 
         self.train_x = np.concatenate(self.train_x, axis=0).astype(np.float32)
-        self.train_y = np.array(self.train_y).astype(np.int32)
-        self.test_x = np.array(self.test_x).astype(np.float32)
-        self.test_y = np.array(self.test_y).astype(np.int32)
+        self.train_y = np.concatenate(self.train_y, axis=0).astype(np.int32)
+        self.test_x = np.concatenate(self.test_x, axis=0).astype(np.float32)
+        self.test_y = np.concatenate(self.test_y, axis=0).astype(np.int32)
 
         self.num_outputs = np.max(self.train_y) + 1
         self.onehot_train_y = onehot(self.train_y, num_classes=self.num_outputs)
         self.onehot_test_y = onehot(self.test_y, num_classes=self.num_outputs)
 
+        if self.use_pca:
+            print('first use pca to reduce the dimension...')
+            pca_cache_dir = os.path.join(self.dataset_path, 'pca_cache')
+            pca_cache_train_path = os.path.join(pca_cache_dir, 'pca_cache_train.npy')
+            pca_cache_test_path = os.path.join(pca_cache_dir, 'pca_cache_test.npy')
+            if os.path.exists(pca_cache_test_path) and os.path.exists(pca_cache_train_path):
+                print('pca caches have already done...')
+                self.train_x_pca = np.load(pca_cache_train_path)
+                self.test_x_pca = np.load(pca_cache_test_path)
+                print('pca representation for training and test data loaded...')
+            else:
+                print('pca caches have not done, get them now...')
+                os.makedirs(pca_cache_dir, exist_ok=True)
+                pca = PCA()
+                pca.fit(self.train_x)
+                var = np.cumsum(pca.explained_variance_ratio_)
+                pca_dims = np.searchsorted(var, self.perc_var) + 1
+                self.train_x_pca = pca.transform(self.train_x)[:, :pca_dims]
+                self.test_x_pca = pca.transform(self.test_x)[:, :pca_dims]
+                np.save(pca_cache_train_path, self.train_x_pca)
+                np.save(pca_cache_test_path, self.test_x_pca)
+                print('pca dims is {}. pca caches are saved...'.format(pca_dims))
+        else:
+            self.train_x_pca = self.train_x
+            self.test_x_pca = self.test_x
+
         if self.use_knn:
             print('find the nearest neighbors...')
-            cache_path = os.path.join(self.dataset_path, 'nn_cache')
-            if os.path.exists(cache_path):
+            nn_cache_path = os.path.join(self.dataset_path, 'nn_cache')
+            nn_cache_train_path = os.path.join(nn_cache_path, 'cifar_10_nn_training_data.npy')
+            nn_cache_test_path = os.path.join(nn_cache_path, 'cifar_10_nn_test_data.npy')
+            if os.path.exists(nn_cache_train_path) and os.path.exists(nn_cache_test_path):
                 print('nearest neighbors have been cached...')
-                self.nn_indices_train = np.load('cifar_10_nn_training_data.npy')
-                self.nn_indices_test = np.load('cifar_10_nn_test_data.npy')
+                self.nn_indices_train = np.load(nn_cache_train_path)[:, 1:self.k + 1]
+                self.nn_indices_test = np.load(nn_cache_test_path)[:, 0:self.k]
                 print('nearest neighbors loaded')
             else:
-                print('nearest neighbors have not been cached, find and cache now...')
-                nn = NearestNeighbors(n_neighbors=self.k, n_jobs=-1)
+                print('nearest neighbors have not been cached, find and cache 500 nearest neighbors now...')
+                os.makedirs(nn_cache_path, exist_ok=True)
+                nn = NearestNeighbors(n_neighbors=500, n_jobs=-1, algorithm='auto')
                 nn.fit(self.train_x)
-                self.nn_indices_train = nn.kneighbors(self.train_x, n_neighbors=self.k + 1, return_distance=False)[:, 1:]
-                self.nn_indices_test = nn.kneighbors(self.test_x, return_distance=False)
-                np.save(os.path.join(cache_path, 'cifar_10_nn_training_data.npy'), self.nn_indices_train)
-                np.save(os.path.join(cache_path, 'cifar_10_nn_test_data.npy'), self.nn_indices_test)
+                nn_indices_train = nn.kneighbors(self.train_x, return_distance=False)
+                nn_indices_test = nn.kneighbors(self.test_x, return_distance=False)
+                np.save(nn_cache_train_path, nn_indices_train)
+                np.save(nn_cache_test_path, nn_indices_test)
+                self.nn_indices_train = nn_indices_train[:, 1:self.k + 1]
+                self.nn_indices_test = nn_indices_test[:, 0:self.k]
                 print('nearest neighbors got and cached...')
         else:
             self.nn_indices_train = None
@@ -190,7 +224,8 @@ if __name__ == '__main__':
         image_mode=True,
         standardization=False,
         use_knn=True,
-        knn=8
+        knn=8,
+        use_pca=True
     )
     training_data = data_loader.training_data(loss=0)
     for a, b, c, d in training_data:
