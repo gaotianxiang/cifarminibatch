@@ -173,7 +173,7 @@ class DataLoader:
                 yield (
                     self.train_x[rprm[start:end]],
                     self.train_y[rprm[start:end]],
-                    np.zeros(shape=(self.batch_size, self.k, self.dims)),
+                    np.zeros(shape=(self.batch_size, self.k) + self.dims),
                     np.zeros(shape=(self.batch_size, self.k, self.num_outputs))
                 )
             start = end
@@ -205,14 +205,18 @@ class DataLoader:
                 yield (
                     self.test_x[start:end],
                     self.test_y[start:end],
-                    np.zeros(shape=())
+                    np.zeros(shape=(self.batch_size, self.k) + self.dims),
+                    np.zeros(shape=(self.batch_size, self.k, self.num_outputs))
                 )
+            start = end
+            end += self.batch_size
 
     def testing_data(self):
         return tqdm(
             iterable=self.testing_next_batch(),
             desc='Test Iterations: ',
-            total=self.num_batches_test
+            total=self.num_batches_test,
+            mininterval=1.0
         )
 
 
