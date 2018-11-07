@@ -69,8 +69,8 @@ class DataLoader:
 
         self.train_x = np.concatenate(self.train_x, axis=0).astype(np.float32)
         self.train_y = np.concatenate(self.train_y, axis=0).astype(np.int32)
-        self.test_x = np.concatenate(self.test_x, axis=0).astype(np.float32)
-        self.test_y = np.concatenate(self.test_y, axis=0).astype(np.int32)
+        self.test_x = np.array(self.test_x).astype(np.float32)
+        self.test_y = np.array(self.test_y).astype(np.int32)
 
         self.num_outputs = np.max(self.train_y) + 1
         self.onehot_train_y = onehot(self.train_y, num_classes=self.num_outputs)
